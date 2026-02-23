@@ -177,6 +177,10 @@ class ConcurrentRoaringBitmap64 {
 
   Status deserialize(const std::string &file_path);
 
+  Status serialize(std::string *out);
+
+  Status deserialize(const void *data, size_t len);
+
  private:
   static const uint64_t roaring_magic_number{0x362DDA444AC1B99A};
 

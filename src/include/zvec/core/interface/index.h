@@ -106,6 +106,8 @@ class Index {
   // static Index::Pointer Create(const BaseIndexParam &param); //IndexFactory
   virtual int Open(const std::string &file_path,
                    StorageOptions storage_options);
+  virtual int Open(const core::IndexStorage::Pointer &storage,
+                   bool read_only);
   int Close();
   int Flush();
   // virtual int Serialize(const std::string &file_path);

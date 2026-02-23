@@ -42,6 +42,7 @@
 #include "db/index/segment/segment.h"
 #include "db/index/segment/segment_helper.h"
 #include "db/index/segment/segment_manager.h"
+#include "db/packed/packed_collection.h"
 #include "db/sqlengine/sqlengine.h"
 
 namespace zvec {
@@ -247,6 +248,11 @@ Result<Collection::Ptr> Collection::CreateAndOpen(
 
 Result<Collection::Ptr> Collection::Open(const std::string &path,
                                          const CollectionOptions &options) {
+  // Detect packed format by extension
+  if (ailego::StringHelper::EndsWith(path, ".zvecpack")) {
+    return PackedCollection::Open(path);
+  }
+
   auto collection = std::make_shared<CollectionImpl>(path);
 
   auto s = collection->Open(options);

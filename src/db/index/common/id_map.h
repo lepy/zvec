@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -67,6 +68,9 @@ class IDMap {
 
   Status multi_get(const std::vector<std::string> &keys,
                    std::vector<uint64_t> *doc_ids) const;
+
+  Status iterate(
+      std::function<bool(const std::string &key, uint64_t doc_id)> cb) const;
 
   size_t storage_size_in_bytes();
 

@@ -34,6 +34,31 @@ Status VectorColumnIndexer::Open(
   }
 }
 
+
+Status VectorColumnIndexer::Open(
+    const core::IndexStorage::Pointer &storage) {
+  if (index != nullptr) {
+    return Status::InvalidArgument("Index already opened");
+  }
+
+  auto index_param_result =
+      ProximaEngineHelper::convert_to_engine_index_param(field_schema_);
+  if (!index_param_result.has_value()) {
+    return Status::InvalidArgument(index_param_result.error().message());
+  }
+  auto &index_param = index_param_result.value();
+
+  index = core_interface::IndexFactory::CreateAndInitIndex(*index_param);
+  if (index == nullptr) {
+    return Status::InternalError("Failed to create index");
+  }
+
+  if (0 != index->Open(storage, /*read_only=*/true)) {
+    return Status::InternalError("Failed to open index from storage");
+  }
+  return Status::OK();
+}
+
 Status VectorColumnIndexer::CreateProximaIndex(
     const vector_column_params::ReadOptions &read_options) {
   auto index_param_result =

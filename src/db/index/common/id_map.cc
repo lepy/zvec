@@ -171,6 +171,34 @@ Status IDMap::multi_get(const std::vector<std::string> &keys,
 }
 
 
+Status IDMap::iterate(
+    std::function<bool(const std::string &key, uint64_t doc_id)> cb) const {
+  if (!opened_) {
+    return Status::InternalError("IDMap is not opened");
+  }
+
+  std::unique_ptr<rocksdb::Iterator> it(
+      rocksdb_context_.db_->NewIterator(rocksdb_context_.read_opts_));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    std::string key = it->key().ToString();
+    if (it->value().size() != sizeof(uint64_t)) {
+      LOG_ERROR("Invalid value size for key[%s] in IDMap[%s]", key.c_str(),
+                working_dir_.c_str());
+      continue;
+    }
+    uint64_t doc_id = *(reinterpret_cast<const uint64_t *>(it->value().data()));
+    if (!cb(key, doc_id)) {
+      break;
+    }
+  }
+  if (!it->status().ok()) {
+    LOG_ERROR("IDMap iteration failed: %s", it->status().ToString().c_str());
+    return Status::InternalError("IDMap iteration failed");
+  }
+  return Status::OK();
+}
+
+
 size_t IDMap::storage_size_in_bytes() {
   return rocksdb_context_.sst_file_size();
 }

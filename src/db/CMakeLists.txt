@@ -9,6 +9,7 @@ cc_proto_library(
 
 cc_directory(common)
 cc_directory(index)
+cc_directory(packed)
 cc_directory(sqlengine)
 
 file(GLOB_RECURSE ALL_DB_SRCS *.cc *.c *.h)

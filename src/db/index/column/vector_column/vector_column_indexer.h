@@ -53,6 +53,7 @@ class VectorColumnIndexer {
 
  public:
   Status Open(const vector_column_params::ReadOptions &read_options);
+  Status Open(const core::IndexStorage::Pointer &storage);
 
   Status Flush();
 

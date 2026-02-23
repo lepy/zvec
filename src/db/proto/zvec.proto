@@ -172,3 +172,13 @@ message Manifest {
 
   uint32 next_segment_id = 8;
 };
+
+message PackedManifest {
+  uint32 pack_version = 1;
+  CollectionSchema schema = 2;
+  repeated SegmentMeta persisted_segment_metas = 3;
+  uint64 total_doc_count = 4;
+  uint64 total_deleted_count = 5;
+  uint64 export_time = 6;
+  string source_path = 7;
+};

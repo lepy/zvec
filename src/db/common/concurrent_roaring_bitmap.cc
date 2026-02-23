@@ -208,4 +208,104 @@ Status ConcurrentRoaringBitmap64::deserialize(const std::string &file_path) {
 }
 
 
+Status ConcurrentRoaringBitmap64::serialize(std::string *out) {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+
+  BitmapMetaHeader header;
+  size_t bitmap_size;
+  std::vector<char> bitmap_buffer;
+  if (is_32bit_) {
+    bitmap_size = bitmap32_->getSizeInBytes();
+    bitmap_buffer.resize(bitmap_size);
+    if (bitmap32_->write(bitmap_buffer.data()) != bitmap_size) {
+      auto msg = debug_str("failed to serialize bitmap to buffer");
+      LOG_ERROR("%s", msg.c_str());
+      return Status::InternalError(msg);
+    }
+    header.is_32bit = 1;
+  } else {
+    bitmap_size = bitmap64_->getSizeInBytes();
+    bitmap_buffer.resize(bitmap_size);
+    if (bitmap64_->write(bitmap_buffer.data()) != bitmap_size) {
+      auto msg = debug_str("failed to serialize bitmap to buffer");
+      LOG_ERROR("%s", msg.c_str());
+      return Status::InternalError(msg);
+    }
+    header.is_32bit = 0;
+  }
+  header.magic = roaring_magic_number;
+  header.checksum = ailego::Crc32c::Hash(bitmap_buffer.data(), bitmap_size);
+  header.timestamp = time(nullptr);
+  memset(header.reserved_, 0, sizeof(header.reserved_));
+
+  out->resize(sizeof(BitmapMetaHeader) + bitmap_size);
+  memcpy(out->data(), &header, sizeof(BitmapMetaHeader));
+  memcpy(out->data() + sizeof(BitmapMetaHeader), bitmap_buffer.data(),
+         bitmap_size);
+
+  LOG_DEBUG("%s: serialized bitmap to buffer, checksum[%u], size[%zu]",
+            identifier_.c_str(), header.checksum,
+            sizeof(BitmapMetaHeader) + bitmap_size);
+  return Status::OK();
+}
+
+
+Status ConcurrentRoaringBitmap64::deserialize(const void *data, size_t len) {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+
+  if (len < sizeof(BitmapMetaHeader)) {
+    auto msg = debug_str("buffer is too small to contain a valid bitmap");
+    LOG_ERROR("%s", msg.c_str());
+    return Status::InternalError(msg);
+  }
+
+  BitmapMetaHeader header;
+  memcpy(&header, data, sizeof(BitmapMetaHeader));
+
+  if (header.magic != roaring_magic_number) {
+    auto msg = debug_str("magic number mismatch in buffer");
+    LOG_ERROR("%s", msg.c_str());
+    return Status::InternalError(msg);
+  }
+  if (header.is_32bit != 0 && header.is_32bit != 1) {
+    auto msg = debug_str("bitmap type mismatch in buffer");
+    LOG_ERROR("%s", msg.c_str());
+    return Status::InternalError(msg);
+  }
+  is_32bit_ = header.is_32bit == 1;
+
+  const char *bitmap_data =
+      static_cast<const char *>(data) + sizeof(BitmapMetaHeader);
+  size_t bitmap_size = len - sizeof(BitmapMetaHeader);
+
+  if (header.checksum != ailego::Crc32c::Hash(bitmap_data, bitmap_size)) {
+    auto msg = debug_str("checksum mismatch in buffer");
+    LOG_ERROR("%s", msg.c_str());
+    return Status::InternalError(msg);
+  }
+
+  try {
+    if (is_32bit_) {
+      bitmap32_ = std::make_unique<roaring::Roaring>(
+          roaring::Roaring::readSafe(bitmap_data, bitmap_size));
+      bitmap64_.reset();
+    } else {
+      bitmap64_ = std::make_unique<roaring::Roaring64Map>(
+          roaring::Roaring64Map::readSafe(bitmap_data, bitmap_size));
+      bitmap32_.reset();
+    }
+  } catch (...) {
+    auto msg = debug_str("failed to deserialize bitmap from buffer");
+    LOG_ERROR("%s", msg.c_str());
+    return Status::InternalError(msg);
+  }
+
+  identifier_ = "Roaring bitmap[" + name_ +
+                 (is_32bit_ ? ", 32-bit]" : ", 64-bit]");
+  LOG_DEBUG("%s: deserialized bitmap from buffer, checksum[%u]",
+            identifier_.c_str(), header.checksum);
+  return Status::OK();
+}
+
+
 }  // namespace zvec

@@ -297,6 +297,22 @@ int Index::Open(const std::string &file_path, StorageOptions storage_options) {
   return 0;
 }
 
+int Index::Open(const core::IndexStorage::Pointer &storage, bool read_only) {
+  storage_ = storage;
+  if (streamer_ == nullptr || streamer_->open(storage_) != 0) {
+    LOG_ERROR("Failed to open streamer from pre-built storage");
+    return core::IndexError_Runtime;
+  }
+  if (!init_context()) {
+    LOG_ERROR("Failed to init context");
+    return core::IndexError_Runtime;
+  }
+  is_open_ = true;
+  is_read_only_ = read_only;
+  return 0;
+}
+
+
 int Index::Close() {
   if (!is_open_) {
     LOG_ERROR("Index is not open");

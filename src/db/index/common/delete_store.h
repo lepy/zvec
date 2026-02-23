@@ -82,6 +82,18 @@ class DeleteStore : public std::enable_shared_from_this<DeleteStore> {
     return status;
   }
 
+  Status load_from_buffer(const void *data, size_t len) {
+    Status status = bitmap_.deserialize(data, len);
+    if (status.ok()) {
+      empty_ = bitmap_.cardinality() == 0 ? true : false;
+      LOG_INFO("Opened delete store from buffer, count[%lu]",
+               bitmap_.cardinality());
+    } else {
+      LOG_ERROR("Failed to load delete store from buffer");
+    }
+    return status;
+  }
+
   Status flush(const std::string &file_path) {
     Status status = bitmap_.serialize(file_path, true);
     if (status.ok()) {
