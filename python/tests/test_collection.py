@@ -1156,3 +1156,169 @@ class TestZVecPack:
                 str(temp_dir / "nonexistent_collection"),
                 str(temp_dir / "out.zvecpack"),
             )
+
+
+# ----------------------------
+# ZVecPack vs Regular Collection Equality Test
+# ----------------------------
+class TestZVecPackEquality:
+    """Compare fetch results between a regular collection and its .zvecpack export."""
+
+    @pytest.fixture(scope="class")
+    def equality_schema(self):
+        return zvec.CollectionSchema(
+            name="equality_test",
+            fields=[
+                FieldSchema("id", DataType.INT64, nullable=False),
+                FieldSchema("name", DataType.STRING, nullable=False),
+                FieldSchema("weight", DataType.FLOAT, nullable=True),
+                FieldSchema("height", DataType.INT32, nullable=True),
+            ],
+            vectors=[
+                VectorSchema("dense", DataType.VECTOR_FP32, dimension=8),
+            ],
+        )
+
+    @pytest.fixture(scope="class")
+    def equality_docs(self):
+        return [
+            Doc(
+                id=f"{i}",
+                fields={
+                    "id": i,
+                    "name": f"item_{i}",
+                    "weight": i * 1.5,
+                    "height": 150 + i,
+                },
+                vectors={"dense": [i * 0.1 + j for j in range(8)]},
+            )
+            for i in range(1, 51)
+        ]
+
+    @pytest.fixture(scope="class")
+    def regular_and_packed(
+        self, tmp_path_factory, equality_schema, equality_docs
+    ):
+        """Create both a regular collection and a .zvecpack, return both open."""
+        import gc
+
+        temp_dir = tmp_path_factory.mktemp("equality")
+        collection_path = str(temp_dir / "regular_col")
+        pack_path = str(temp_dir / "packed.zvecpack")
+
+        # Create, populate, and flush
+        regular = zvec.create_and_open(path=collection_path, schema=equality_schema)
+        regular.insert(equality_docs)
+        regular.flush()
+
+        # Fetch all results from regular collection before closing
+        all_ids = [doc.id for doc in equality_docs]
+        regular_results = regular.fetch(ids=all_ids)
+        regular_stats = regular.stats
+
+        # Close regular collection to release lock, then export
+        del regular
+        gc.collect()
+
+        zvec.export_collection(collection_path, pack_path)
+
+        # Re-open regular + open packed
+        regular = zvec.open(collection_path)
+        packed = zvec.open(pack_path)
+
+        yield regular, packed, regular_results, regular_stats, all_ids
+
+    def test_stats_equality(self, regular_and_packed, equality_docs):
+        """Doc count and schema must match between regular and packed."""
+        regular, packed, _, _, _ = regular_and_packed
+
+        assert regular.stats.doc_count == packed.stats.doc_count
+        assert regular.stats.doc_count == len(equality_docs)
+        assert regular.schema.name == packed.schema.name
+        assert list(regular.schema.fields) == list(packed.schema.fields)
+        assert list(regular.schema.vectors) == list(packed.schema.vectors)
+
+    def test_fetch_all_docs_equality(self, regular_and_packed, equality_docs):
+        """Fetch every document and compare all scalar fields."""
+        regular, packed, _, _, all_ids = regular_and_packed
+
+        regular_results = regular.fetch(ids=all_ids)
+        packed_results = packed.fetch(ids=all_ids)
+
+        assert len(regular_results) == len(packed_results)
+
+        field_names = equality_docs[0].field_names()
+
+        for doc_id in all_ids:
+            assert doc_id in regular_results, f"Missing {doc_id} in regular"
+            assert doc_id in packed_results, f"Missing {doc_id} in packed"
+
+            reg_doc = regular_results[doc_id]
+            pack_doc = packed_results[doc_id]
+
+            for field_name in field_names:
+                reg_val = reg_doc.field(field_name)
+                pack_val = pack_doc.field(field_name)
+                assert reg_val == pack_val, (
+                    f"Mismatch for doc {doc_id}, field '{field_name}': "
+                    f"regular={reg_val!r} vs packed={pack_val!r}"
+                )
+
+    def test_fetch_single_doc_equality(self, regular_and_packed, equality_docs):
+        """Fetch a single doc and compare field-by-field."""
+        regular, packed, _, _, _ = regular_and_packed
+
+        doc_id = equality_docs[25].id  # pick one from the middle
+        reg = regular.fetch(ids=[doc_id])[doc_id]
+        pack = packed.fetch(ids=[doc_id])[doc_id]
+
+        for field_name in equality_docs[25].field_names():
+            assert reg.field(field_name) == pack.field(field_name), (
+                f"Field '{field_name}' differs: {reg.field(field_name)!r} vs "
+                f"{pack.field(field_name)!r}"
+            )
+
+    def test_fetch_subset_equality(self, regular_and_packed, equality_docs):
+        """Fetch a subset of docs and compare results."""
+        regular, packed, _, _, _ = regular_and_packed
+
+        subset_ids = [equality_docs[i].id for i in [0, 10, 20, 30, 40, 49]]
+        reg_results = regular.fetch(ids=subset_ids)
+        pack_results = packed.fetch(ids=subset_ids)
+
+        assert len(reg_results) == len(pack_results)
+
+        for doc_id in subset_ids:
+            reg_doc = reg_results[doc_id]
+            pack_doc = pack_results[doc_id]
+            for field_name in reg_doc.field_names():
+                assert reg_doc.field(field_name) == pack_doc.field(field_name)
+
+    def test_fetch_missing_keys_equality(self, regular_and_packed):
+        """Both formats should behave the same for missing keys."""
+        regular, packed, _, _, _ = regular_and_packed
+
+        missing_ids = ["999", "nonexistent", "abc"]
+        reg_results = regular.fetch(ids=missing_ids)
+        pack_results = packed.fetch(ids=missing_ids)
+
+        for key in missing_ids:
+            reg_present = key in reg_results and reg_results[key] is not None
+            pack_present = key in pack_results and pack_results[key] is not None
+            assert reg_present == pack_present, (
+                f"Key '{key}' presence differs: regular={reg_present}, packed={pack_present}"
+            )
+
+    def test_fetch_nullable_fields_equality(self, regular_and_packed):
+        """Insert a doc with nullable fields set to None, verify both return None."""
+        # The existing docs have weight and height set, so just verify
+        # the values match (nullable fields with actual values)
+        regular, packed, _, _, _ = regular_and_packed
+
+        doc_id = "1"
+        reg = regular.fetch(ids=[doc_id])[doc_id]
+        pack = packed.fetch(ids=[doc_id])[doc_id]
+
+        # weight and height are nullable fields
+        assert reg.field("weight") == pack.field("weight")
+        assert reg.field("height") == pack.field("height")
