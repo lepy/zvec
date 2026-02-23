@@ -38,6 +38,7 @@
 - **Dense + Sparse Vectors**: Work with both dense and sparse embeddings, with native support for multi-vector queries in a single call.
 - **Hybrid Search**: Combine semantic similarity with structured filters for precise results.
 - **Runs Anywhere**: As an in-process library, Zvec runs wherever your code runs — notebooks, servers, CLI tools, or even edge devices.
+- **Single-File Export**: Pack any collection into a single `.zvecpack` file for portable, read-only inference.
 
 ## 📦 Installation
 
@@ -92,6 +93,35 @@ results = collection.query(
 
 # Results: list of {'id': str, 'score': float, ...}, sorted by relevance
 print(results)
+```
+
+## 📦 Single-File Export (`.zvecpack`)
+
+Export any collection into a single, portable `.zvecpack` file for read-only inference — ideal for deployment, sharing, or embedding in containers.
+
+```python
+import zvec
+
+zvec.init()
+
+# Create and populate a collection
+schema = zvec.CollectionSchema(
+    name="my_collection",
+    vectors=zvec.VectorSchema("embedding", zvec.DataType.VECTOR_FP32, 4),
+)
+col = zvec.create_and_open("./my_collection", schema)
+col.insert([
+    zvec.Doc(id="doc_1", vectors={"embedding": [0.1, 0.2, 0.3, 0.4]}),
+    zvec.Doc(id="doc_2", vectors={"embedding": [0.2, 0.3, 0.4, 0.1]}),
+])
+col.flush()
+
+# Export to a single file
+zvec.export_collection("./my_collection", "./my_collection.zvecpack")
+
+# Open the packed file — read-only, zero setup
+packed = zvec.open("./my_collection.zvecpack")
+packed.fetch(["doc_1"])  # same API as a regular collection
 ```
 
 ## 📈 Performance at Scale
