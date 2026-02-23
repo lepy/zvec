@@ -1043,3 +1043,116 @@ class TestCollectionQuery:
         self, collection_with_multiple_docs: Collection, multiple_docs
     ):
         pass
+
+
+# ----------------------------
+# ZVecPack Export Test Case
+# ----------------------------
+class TestZVecPack:
+    @pytest.fixture(scope="class")
+    def zvecpack_schema(self):
+        """Schema for .zvecpack tests (no vector index param — index is not
+        embedded in segments so the packed reader won't try to open it)."""
+        return zvec.CollectionSchema(
+            name="test_packed_collection",
+            fields=[
+                FieldSchema(
+                    "id",
+                    DataType.INT64,
+                    nullable=False,
+                    index_param=InvertIndexParam(),
+                ),
+                FieldSchema("name", DataType.STRING, nullable=False),
+                FieldSchema("weight", DataType.FLOAT, nullable=True),
+            ],
+            vectors=[
+                VectorSchema(
+                    "dense",
+                    DataType.VECTOR_FP32,
+                    dimension=4,
+                ),
+            ],
+        )
+
+    @pytest.fixture(scope="class")
+    def zvecpack_docs(self):
+        return [
+            Doc(
+                id=f"{i}",
+                fields={"id": i, "name": f"doc_{i}", "weight": float(i)},
+                vectors={"dense": [i + 0.1, i + 0.2, i + 0.3, i + 0.4]},
+            )
+            for i in range(1, 101)
+        ]
+
+    @pytest.fixture
+    def packed_collection(self, tmp_path_factory, zvecpack_schema, zvecpack_docs):
+        """Create a collection, insert docs, flush, export to .zvecpack, and open it."""
+        import gc
+
+        temp_dir = tmp_path_factory.mktemp("zvecpack")
+        collection_path = str(temp_dir / "source_collection")
+        pack_path = str(temp_dir / "test.zvecpack")
+
+        # Create source collection and insert data
+        coll = zvec.create_and_open(
+            path=collection_path, schema=zvecpack_schema
+        )
+        coll.insert(zvecpack_docs)
+        coll.flush()
+
+        # Close source collection before export (release file lock)
+        del coll
+        gc.collect()
+
+        # Export to .zvecpack
+        zvec.export_collection(collection_path, pack_path)
+
+        # Open packed collection
+        packed = zvec.open(pack_path)
+        yield packed
+
+    def test_export_and_open_zvecpack(
+        self, packed_collection: Collection, zvecpack_schema, zvecpack_docs
+    ):
+        """Export a collection and verify schema & stats match."""
+        assert packed_collection is not None
+        assert packed_collection.schema.name == zvecpack_schema.name
+        assert list(packed_collection.schema.fields) == list(zvecpack_schema.fields)
+        assert list(packed_collection.schema.vectors) == list(zvecpack_schema.vectors)
+        assert packed_collection.stats.doc_count == len(zvecpack_docs)
+
+    def test_zvecpack_fetch(self, packed_collection: Collection, zvecpack_docs):
+        """Fetch documents by primary key from a .zvecpack file."""
+        ids = [zvecpack_docs[0].id, zvecpack_docs[1].id]
+        result = packed_collection.fetch(ids=ids)
+        assert len(result) == 2
+        for i, doc_id in enumerate(ids):
+            assert doc_id in result
+            doc = result[doc_id]
+            assert doc.field("name") == zvecpack_docs[i].field("name")
+            assert doc.field("id") == zvecpack_docs[i].field("id")
+
+    def test_zvecpack_fetch_missing_key(self, packed_collection: Collection):
+        """Fetch a non-existent key from a .zvecpack file."""
+        result = packed_collection.fetch(ids=["nonexistent"])
+        assert "nonexistent" not in result or result["nonexistent"] is None
+
+    def test_zvecpack_read_only(self, packed_collection: Collection):
+        """Write operations on .zvecpack should raise an error."""
+        doc = Doc(
+            id="new_doc",
+            fields={"id": 999, "name": "fail", "weight": 1.0},
+            vectors={"dense": [0.1, 0.2, 0.3, 0.4]},
+        )
+        with pytest.raises(Exception):
+            packed_collection.insert(doc)
+
+    def test_export_invalid_paths(self, tmp_path_factory):
+        """Export with invalid source path should raise an error."""
+        temp_dir = tmp_path_factory.mktemp("zvecpack_err")
+        with pytest.raises(Exception):
+            zvec.export_collection(
+                str(temp_dir / "nonexistent_collection"),
+                str(temp_dir / "out.zvecpack"),
+            )

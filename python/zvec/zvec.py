@@ -15,13 +15,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from _zvec import Initialize, _Collection
+from _zvec import ExportCollection, Initialize, _Collection
 
 from .model import Collection
 from .model.param import CollectionOption
 from .model.schema import CollectionSchema
 
-__all__ = ["create_and_open", "init", "open"]
+__all__ = ["create_and_open", "export_collection", "init", "open"]
 
 from .typing.enum import LogLevel, LogType
 
@@ -224,3 +224,28 @@ def open(path: str, option: CollectionOption = CollectionOption()) -> Collection
     """
     _collection = _Collection.Open(path, option)
     return Collection._from_core(_collection)
+
+
+def export_collection(collection_path: str, output_path: str) -> None:
+    """Export a collection to a single .zvecpack file for read-only inference.
+
+    The resulting ``.zvecpack`` file can be opened with :func:`open` just like
+    a regular collection, but only supports read operations (query, fetch).
+
+    Args:
+        collection_path (str): Path to the source collection directory.
+        output_path (str): Destination path for the ``.zvecpack`` file.
+
+    Raises:
+        RuntimeError: If the export fails (e.g., source does not exist).
+
+    Examples:
+        >>> import zvec
+        >>> zvec.export_collection("./my_collection", "./my_collection.zvecpack")
+        >>> packed = zvec.open("./my_collection.zvecpack")
+    """
+    if not isinstance(collection_path, str):
+        raise TypeError("collection_path must be a string")
+    if not isinstance(output_path, str):
+        raise TypeError("output_path must be a string")
+    ExportCollection(collection_path, output_path)

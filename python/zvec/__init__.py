@@ -87,7 +87,7 @@ from .typing import (
 from .typing.enum import LogLevel, LogType
 
 # —— lifecycle ——
-from .zvec import create_and_open, init, open
+from .zvec import create_and_open, export_collection, init, open
 
 # ==============================
 # Public interface declaration
@@ -95,6 +95,7 @@ from .zvec import create_and_open, init, open
 __all__ = [
     # Zvec functions
     "create_and_open",
+    "export_collection",
     "init",
     "open",
     # Core classes

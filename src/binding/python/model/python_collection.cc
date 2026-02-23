@@ -15,6 +15,7 @@
 #include "python_collection.h"
 #include <pybind11/stl.h>
 #include <zvec/db/collection.h>
+#include <zvec/db/collection_exporter.h>
 
 namespace zvec {
 
@@ -53,6 +54,13 @@ void ZVecPyCollection::Initialize(pybind11::module_ &m) {
   bind_ddl_methods(collection);
   bind_dml_methods(collection);
   bind_dql_methods(collection);
+  m.def("ExportCollection",
+        [](const std::string &collection_path, const std::string &output_path) {
+          auto status = CollectionExporter::Export(collection_path, output_path);
+          throw_if_error(status);
+        },
+        py::arg("collection_path"), py::arg("output_path"));
+
   collection.def(py::pickle(
       [](const Collection &c) {
         return py::make_tuple(c.Path(), c.Schema(), c.Options());
